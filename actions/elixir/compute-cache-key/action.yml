@@ -1,0 +1,50 @@
+name: Computes a Cache Key for BEAM applications
+description: Uses the given inputs, the runner OS, and MIX_ENV to compute a cache key.
+
+inputs:
+  # Required
+  prefix:
+    description: The prefix used for every cache, ought to include OS name and version, and BEAM versions.
+    required: true
+  otp-app:
+    description: The name of the OTP app.
+    required: true
+  MIX_ENV:
+    description: The MIX_ENV with which this action should run.
+    required: true
+
+  # Optional
+  version:
+    description: The leading version prefix for the cache (useful to invalidate)
+    required: false
+    default: 'v1'
+  generate-summary:
+    description: Whether or not the action should generate a step summary. Defaults to `false`.
+    required: false
+    default: 'false'
+
+outputs:
+  key:
+    description: The computed cache key.
+    value: ${{ steps.compute.outputs.key }}
+
+runs:
+  using: composite
+  steps:
+    - name: Compute cache key
+      id: compute
+      shell: sh
+      run: |
+        echo "key=${{ inputs.version }}-${{ inputs.otp-app}}-${{ inputs.prefix }}-MIX_ENV:${{ inputs.MIX_ENV }}" >>$GITHUB_OUTPUT
+        echo "Set key to '$key'"
+
+    - name: Generate action summary
+      if: inputs.generate-summary == 'true'
+      shell: sh
+      run: |
+        {
+          echo '### :zap: Compute Cache Key'
+          echo '```'
+          echo '${{ steps.compute.outputs.key }}'
+          echo '```'
+        } >>$GITHUB_STEP_SUMMARY

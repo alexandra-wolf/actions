@@ -1,0 +1,70 @@
+name: Setup BEAM, Install Deps, and Compile App
+description: Composite of the compute-cache-key, install-deps, and compile actions.
+
+inputs:
+  # Required
+  cache-prefix:
+    description: The prefix used for every cache, ought to include OS name and version, and BEAM versions.
+    required: true
+  otp-app:
+    description: The name of the OTP app.
+    required: true
+  MIX_ENV:
+    description: The MIX_ENV with which this action should run.
+    required: true
+
+  # Optional
+  cache-version:
+    description: The leading cache-version prefix (useful to invalidate caches).
+    required: false
+    default: 'v1'
+  generate-summary:
+    description: Whether or not the action should generate a step summary. Defaults to `false`.
+    required: false
+    default: 'false'
+
+outputs:
+  cache-prefix:
+    description: The generated cache prefix used for all generated caches (includes cache-version, cache-prefix, MIX_ENV).
+    value: ${{ steps.compute.outputs.cache-prefix }}
+  cache-key-compile:
+    description: The full cache key used to cache the compiled app.
+    value: ${{ steps.compile.outputs.cache-key }}
+  cache-key-partial-compile:
+    description: The beginning of the cache key used to cache the compiled app, useful for `restore_keys`
+    value: ${{ steps.compile.outputs.cache-key-partial }}
+  cache-key-deps:
+    description: The full cache key used to cache dependencies
+    value: ${{ steps.install-deps.outputs.cache-key }}
+  cache-key-partial-deps:
+    description: The beginning of the cache key used to cache dependencies, useful for `restore_keys`
+    value: ${{ steps.install-deps.outputs.cache-key-partial }}
+
+runs:
+  using: composite
+  steps:
+
+    - id: cache
+      uses: ./elixir/compute-cache-key
+      with:
+        otp-app: ${{ inputs.otp-app }}
+        prefix: ${{ inputs.cache-prefix }}
+        version: ${{ inputs.cache-version }}
+        generate-summary: ${{ inputs.generate-summary }}
+        MIX_ENV: ${{ inputs.MIX_ENV }}
+
+    - id: install-deps
+      uses: ./elixir/install-deps
+      with:
+        otp-app: ${{ inputs.otp-app }}
+        cache-prefix: ${{ steps.cache.outputs.key }}
+        generate-summary: ${{ inputs.generate-summary }}
+        MIX_ENV: ${{ inputs.MIX_ENV }}
+
+    - id: compile
+      uses: ./elixir/compile
+      with:
+        otp-app: ${{ inputs.otp-app }}
+        cache-prefix: ${{ steps.cache.outputs.key }}
+        generate-summary: ${{ inputs.generate-summary }}
+        MIX_ENV: ${{ inputs.MIX_ENV }}

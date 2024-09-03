@@ -1,0 +1,121 @@
+name: Install, Compile, and Cache Mix Dependencies
+description: Runs mix deps.get followed by mix deps.compile and caches them with the given cache-prefix.
+
+inputs:
+  # Required
+  otp-app:
+    description: The name of the OTP app.
+    required: true
+  cache-prefix:
+    description: The prefix that should be added to all cache keys.
+    required: true
+  MIX_ENV:
+    description: The MIX_ENV with which this action should run.
+    required: true
+
+  # Optional
+  generate-summary:
+    description: Whether or not the action should generate a step summary. Defaults to `false`.
+    required: false
+    default: 'false'
+
+outputs:
+  cache-key:
+    description: The full cache key used to cache dependencies.
+    value: ${{ steps.compute.outputs.key }}
+  cache-key-partial:
+    description: The beginning of the cache key, useful for `restore_keys`.
+    value: ${{ steps.compute.outputs.key-partial }}.
+
+runs:
+  using: composite
+  steps:
+    - name: Compute cache key
+      id: compute
+      shell: sh
+      run: |
+        key_partial="${{ inputs.cache-prefix }}-deps"
+        key="$key_partial-mix.lock:${{ hashFiles('mix.lock') }}"
+
+        echo "key-partial=$key_partial" >>$GITHUB_OUTPUT
+        echo "key=$key" >>$GITHUB_OUTPUT
+
+        echo "Set cache key to '$key'"
+
+    - name: Cache mix dependencies
+      id: cache
+      uses: actions/cache@v4
+      with:
+        # Note: `!**/<otp-app>` excludes app-specific build artifacts from the
+        # deps cache. This cache is only busted on changes to `mix.lock` so
+        # some application changes may be inappropriately cached.
+        path: |
+          deps
+          _build
+          !**/${{ inputs.otp-app }}
+        key: ${{ steps.compute.outputs.key }}
+        restore-keys: |
+          ${{ steps.compute.outputs.key-partial }}-
+
+    - name: Generate action summary
+      if: inputs.generate-summary == 'true'
+      shell: sh
+      run: |
+        {
+          echo '### :arrow_up: Install Deps (${{ inputs.MIX_ENV }})'
+          echo '<details><summary>Cache Key</summary>' >>$GITHUB_STEP_SUMMARY
+          echo
+          echo '```'
+          echo '${{ steps.compute.outputs.key }}'
+          echo '```'
+          echo
+          echo '</details>'
+
+          echo '<details><summary>Cache Key (partial)</summary>' >>$GITHUB_STEP_SUMMARY
+          echo
+          echo '```'
+          echo '${{ steps.compute.outputs.key_partial }}'
+          echo '```'
+          echo
+          echo '</details>'
+
+          echo
+          echo '#### :arrow_up: Output'
+          if [[ '${{ steps.cache.outputs.cache-hit }}' == 'true' ]]; then
+            echo 'Hit cache. No need to install dependencies.'
+          fi
+        } >>$GITHUB_STEP_SUMMARY
+
+    - name: Setup hex and rebar
+      shell: sh
+      run: |
+        mix local.hex --force
+        mix local.rebar --force
+
+    - name: Get and compile mix dependencies
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: sh
+      env:
+        MIX_ENV: ${{ inputs.MIX_ENV }}
+      run: |
+        mix deps.get --only ${{ inputs.MIX_ENV }} | tee mix-deps.get.output
+        mix deps.compile | tee mix-deps.compile.output
+
+        if ${{ inputs.generate-summary }}; then
+          echo '<details><summary><code>mix deps.get --only ${{ inputs.MIX_ENV }}</code></summary>'
+          echo
+          echo '```'
+          cat mix-deps.get.output
+          echo '```'
+          echo
+          echo '</details>'
+
+          echo '<details><summary><code>mix deps.compile</code></summary>'
+          echo
+          echo '```'
+          cat mix-deps.compile.output
+          echo '```'
+          echo
+          echo '</details>'
+        fi >>$GITHUB_STEP_SUMMARY
+

@@ -1,0 +1,79 @@
+name: Publish to Hex.pm
+description: Publishes the app as a downloadable dependency to Hex.pm.
+
+inputs:
+  # Required
+  cache-prefix:
+    description: The prefix that should be added to all cache keys.
+    required: true
+  otp-app:
+    description: The name of the OTP app.
+    required: true
+  HEX_API_KEY:
+    description: The API key to publish to Hex.pm.
+    required: true
+  MIX_ENV:
+    description: The MIX_ENV with which this action should run.
+    required: true
+
+  # Optional
+  cache-version:
+    description: The leading cache-version prefix (useful to invalidate caches).
+    required: false
+    default: 'v1'
+  generate-summary:
+    description: Whether or not the action should generate a step summary. Defaults to `false`.
+    required: false
+    default: 'false'
+
+runs:
+  using: composite
+  steps:
+    - name: Write the release version to the version file
+      shell: sh
+      run: |
+        exit_status=0
+
+        case "$GITHUB_REF" do
+          refs/tags/v*)
+            echo "Create version file for $GITHUB_REF"
+            echo -n "${GITHUB_REF#refs/tags/v}" >version
+            ;;
+
+          *)
+            echo "The ref pointing to the current commit is not a valid version tag:"
+            echo "  actual:   $GITHUB_REF"
+            echo "  expected: refs/tags/v*"
+            exit_status=1
+            ;;
+        esac | tee write-version.output
+
+        if ${{ inputs.generate-summary }}; then
+          cat write-version.output
+        fi >>$GITHUB_STEP_SUMMARY
+
+        exit $exit_status
+
+    - uses: ./actions/elixir/setup-and-compile
+      with:
+        otp-app: ${{ inputs.otp-app }}
+        cache-prefix: ${{ inputs.cache-prefix }}
+        cache-version: ${{ inputs.cache-version }}
+        generate-summary: ${{ inputs.generate-summary }}
+
+    - name: Publish to Hex.pm
+      shell: sh
+      env:
+        HEX_API_KEY: ${{ inputs.HEX_API_KEY }}
+      run: |
+        mix hex.publish --yes | tee mix-hex.publish.output
+
+        if ${{ inputs.generate-summary }}; then
+          echo '<details><summary><code>mix hex.publish</code></summary>'
+          echo
+          echo '```'
+          cat mix-hex.publish.output
+          echo '```'
+          echo
+          echo '</details>'
+        fi >>$GITHUB_STEP_SUMMARY

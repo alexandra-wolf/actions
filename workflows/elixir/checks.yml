@@ -1,0 +1,94 @@
+name: Checks
+run-name: checks (${{ inputs.otp-app }} - ${{ inputs.container }})
+
+on:
+  workflow_call:
+    inputs:
+      otp-app:
+        description: The name of the OTP app.
+        type: string
+        required: true
+      container:
+        description: The docker image that should be used to run this workflow.
+        type: string
+        required: true
+      cache-version:
+        description: The leading cache-version prefix (useful to invalidate caches).
+        type: string
+        required: false
+        default: 'v1'
+      MIX_ENV:
+        description: The MIX_ENV in which this workflow should run.
+        type: string
+        required: false
+        default: 'test'
+
+env:
+  MIX_ENV: ${{ inputs.MIX_ENV }}
+
+jobs:
+  # Warmup cache
+  setup:
+    runs-on: ubuntu-latest
+    container: ${{ inputs.container }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./actions/elixir/setup-and-compile
+        with:
+          otp-app: ${{ inputs.otp-app }}
+          cache-prefix: ${{ inputs.container }}
+          cache-version: ${{ inputs.cache-version }}
+          generate-summary: true
+
+  style:
+    needs: [setup]
+    runs-on: ubuntu-latest
+    container: ${{ inputs.container }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./actions/elixir/setup-and-compile
+        with:
+          otp-app: ${{ inputs.otp-app }}
+          cache-prefix: ${{ inputs.container }}
+          cache-version: ${{ inputs.cache-version }}
+          generate-summary: true
+
+      - run: mix format --check-formatted
+      - run: mix credo
+
+  types:
+    needs: [setup]
+    runs-on: ubuntu-latest
+    container: ${{ inputs.container }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: setup
+        uses: ./actions/elixir/setup-and-compile
+        with:
+          otp-app: ${{ inputs.otp-app }}
+          cache-prefix: ${{ inputs.container }}
+          cache-version: ${{ inputs.cache-version }}
+          generate-summary: true
+
+      - name: Cache - Dialyzer PLTs
+        id: plt_cache
+        uses: actions/cache@v4
+        with:
+          path: .dialyzer/
+          key: ${{ steps.setup.outputs.cache-prefix }}-dialyzer-mix.lock:${{ hashFiles('mix.lock') }}-${{ hashFiles('lib/**') }}
+          restore-keys: |
+            ${{ steps.setup.outputs.cache-prefix }}-dialyzer-mix.lock:${{ hashFiles('mix.lock') }}-
+            ${{ steps.setup.outputs.cache-prefix }}-dialyzer-
+
+      - run: mix dialyzer --format github
+
+      - if: steps.plt_cache.outputs.cache-hit != 'true'
+        name: Save PLT cache
+        id: plt_cache_save
+        uses: actions/cache/save@v4
+        with:
+          path: .dialyzer/
+          key: ${{ steps.setup.outputs.cache-prefix }}-dialyzer-mix.lock:${{ hashFiles('mix.lock') }}-${{ hashFiles('lib/**') }}
